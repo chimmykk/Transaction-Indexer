@@ -1,28 +1,32 @@
 const express = require('express');
-const fetch = require('node-fetch');
 const { getDbConnection } = require('./lib/db');
+const fetch = require('node-fetch'); // Make sure to install this package: npm install node-fetch
+const axios = require('axios'); // Import axios
 
 const app = express();
-const port = 5000;
+const port = 1100; // You can use any port number you prefer
 
-app.use(express.json());
+app.use(express.json()); // Middleware to parse JSON bodies
 
+// Middleware to set CORS headers
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    next();
+});
+
+// GET /getcollection endpoint
 app.get('/getcollection', async (req, res) => {
-    if (req.method !== 'GET') {
-        return res.status(405).json({ error: 'Method not allowed' });
-    }
-
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : 1000;
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
     try {
+        // Get the database connection pool
         const pool = await getDbConnection();
+
+        // Execute the query
         const [results] = await pool.query(`
-            SELECT address, name, type, symbol FROM collections
-            ORDER BY name
+            SELECT symbol, permalink, address FROM collections
             LIMIT ?
         `, [limit]);
 
@@ -30,6 +34,154 @@ app.get('/getcollection', async (req, res) => {
             return res.json({ message: 'No records found in the collections table.' });
         }
 
+        res.json(results);
+    } catch (error) {
+        console.error('Error fetching data from collections table:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /mostmint endpoint
+app.get('/mostmint', async (req, res) => {
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+
+    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 1000;
+
+    try {
+        // Get the database connection pool
+        const pool = await getDbConnection();
+
+        // Check if the connection is established
+        const isConnected = await checkConnection(pool);
+        if (!isConnected) {
+            return res.status(500).json({ error: 'Database connection failed' });
+        }
+
+        const [results] = await pool.query(`
+            SELECT * FROM taikocampaign
+            ORDER BY totalmint DESC
+            LIMIT ?
+        `, [limit]);
+
+        const response = results.length > 0
+            ? results
+                .map((row, index) => ({
+                    rank: index + 1,
+                    wallet: row.address,
+                    username: row.username,
+                    rankScore: index + 1,
+                    nfts: row.totalmint,
+                }))
+            : { message: 'No records found in the taikocampaign table.' };
+
+        res.json(response);
+    } catch (error) {
+        console.error('Error fetching data from taikocampaign table:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/topcreator', async (req, res) => {
+    if (req.method !== 'GET') {
+        return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    try {
+        // Get the database connection pool
+        const pool = await getDbConnection();
+
+        // Query to get contract addresses
+        const [rows] = await pool.query('SELECT * FROM top_creattor');
+        const contractAddresses = rows.map(row => row.contractaddress);
+
+        // Function to fetch contract deployer details
+        const fetchContractDeployer = async (contractAddress) => {
+            const apiUrl = 'https://blockscoutapi.hekla.taiko.xyz/api';
+
+            try {
+                const response = await axios.get(apiUrl, {
+                    params: {
+                        module: 'contract',
+                        action: 'getcontractcreation',
+                        contractaddresses: contractAddress
+                    }
+                });
+
+                const data = response.data.result[0];
+                return {
+                    contractAddress: data.contractAddress,
+                    contractCreator: data.contractCreator
+                };
+            } catch (error) {
+                console.error(`Error fetching details for contract ${contractAddress}:`, error);
+                return {
+                    contractAddress,
+                    contractCreator: null
+                };
+            }
+        };
+
+        // Fetch contract deployer details for all addresses
+        const contractDetails = await Promise.all(contractAddresses.map(fetchContractDeployer));
+
+        // Update rows with contract creator details
+        const updatedData = rows.map(row => {
+            const details = contractDetails.find(detail => detail.contractAddress === row.contractaddress);
+            return {
+                ...row,
+                contractCreator: details ? details.contractCreator : null
+            };
+        });
+
+        res.status(200).json(updatedData);
+
+    } catch (error) {
+        console.error('Error fetching data from database:', error);
+        res.status(500).json({ error: 'Error fetching data from database' });
+    }
+});
+
+app.get('/topcollector', async (req, res) => {
+    if (req.method !== 'GET') {
+        return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    try {
+        // Get the database connection pool
+        const pool = await getDbConnection();
+
+        // Execute the query
+        const [rows] = await pool.query('SELECT * FROM top_collectors');
+
+        res.status(200).json(rows);
+    } catch (error) {
+        console.error('Error fetching data from database:', error);
+        res.status(500).json({ error: 'Error fetching data from database' });
+    }
+});
+
+// GET /mostholder endpoint
+app.get('/mostholder', async (req, res) => {
+    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 20;
+
+    try {
+        // Get the database connection pool
+        const pool = await getDbConnection();
+
+        // Execute the query to fetch data from the local database
+        const [results] = await pool.query(
+            `SELECT address, name, type, symbol FROM collections ORDER BY name LIMIT ?`,
+            [limit]
+        );
+
+        if (results.length === 0) {
+            return res.json({ message: 'No records found in the collections table.' });
+        }
+
+        // Helper function to fetch additional token details
         const fetchTokenDetails = async (address) => {
             const apiUrl = `https://blockscoutapi.hekla.taiko.xyz/api?module=token&action=getToken&contractaddress=${address}`;
 
@@ -59,6 +211,8 @@ app.get('/getcollection', async (req, res) => {
                 return { additionalInfo: {}, tokenHolder: null };
             }
         };
+
+        // Fetch token details concurrently for all results
         const enhancedResults = await Promise.all(
             results.map(async (item) => {
                 const tokenDetails = await fetchTokenDetails(item.address);
@@ -74,9 +228,14 @@ app.get('/getcollection', async (req, res) => {
             })
         );
 
+        // Sort by totalSupply in descending order
         enhancedResults.sort((a, b) => {
-            const totalSupplyA = parseInt(a.additionalInfo.result.totalSupply, 10);
-            const totalSupplyB = parseInt(b.additionalInfo.result.totalSupply, 10);
+            const totalSupplyA = a.additionalInfo && a.additionalInfo.result && a.additionalInfo.result.totalSupply
+                ? parseInt(a.additionalInfo.result.totalSupply, 10)
+                : 0;
+            const totalSupplyB = b.additionalInfo && b.additionalInfo.result && b.additionalInfo.result.totalSupply
+                ? parseInt(b.additionalInfo.result.totalSupply, 10)
+                : 0;
             return totalSupplyB - totalSupplyA;
         });
 
@@ -87,112 +246,16 @@ app.get('/getcollection', async (req, res) => {
     }
 });
 
-// Route to get most holders data
-app.get('/mostholder', async (req, res) => {
-    // Handle preflight requests
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-
-    if (req.method !== 'GET') {
-        return res.status(405).json({ error: 'Method not allowed' });
-    }
-
-    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 1000;
-
+// Function to check database connection
+async function checkConnection(pool) {
     try {
-        const pool = await getDbConnection();
-
-        // Check if the connection is established
-        const isConnected = await checkConnection(pool);
-        if (!isConnected) {
-            return res.status(500).json({ error: 'Database connection failed' });
-        }
-
-        const [results] = await pool.query(`
-            SELECT * FROM taikocampaign
-            ORDER BY totalmint DESC
-            LIMIT ?
-        `, [limit]);
-
-        const response = results.length > 0
-            ? results
-                .sort((a, b) => b.totalmint - a.totalmint)
-                .map((row, index) => ({
-                    rank: index + 1,
-                    wallet: row.address,
-                    username: row.username,
-                    rankScore: index + 1,
-                    nfts: row.totalmint,
-                    labels: row.categories,
-                    activity: `https://mintpad-trailblazers.vercel.app/activity-example.svg`,
-                    avatar: `https://res.cloudinary.com/twdin/image/upload/v1719839745/avatar-example_mc0r1g.png`,
-                    opensea: row.opensea,
-                    twitter: row.twitter,
-                    blockscan: row.Blockscan,
-                    profile: row.profilepic,
-                }))
-            : { message: 'No records found in the taikocampaign table.' };
-
-        res.json(response);
+        await pool.query('SELECT 1');
+        return true;
     } catch (error) {
-        console.error('Error fetching data from taikocampaign table:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        console.error('Database connection check failed:', error);
+        return false;
     }
-});
-
-// Route to get most minted data
-app.get('/mostmint', async (req, res) => {
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-
-    if (req.method !== 'GET') {
-        return res.status(405).json({ error: 'Method not allowed' });
-    }
-
-    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 1000;
-
-    try {
-        const pool = await getDbConnection();
-
-        // Check if the connection is established
-        const isConnected = await checkConnection(pool);
-        if (!isConnected) {
-            return res.status(500).json({ error: 'Database connection failed' });
-        }
-
-        const [results] = await pool.query(`
-            SELECT * FROM taikocampaign
-            ORDER BY totalmint DESC
-            LIMIT ?
-        `, [limit]);
-
-        const response = results.length > 0
-            ? results
-                .sort((a, b) => b.totalmint - a.totalmint)
-                .map((row, index) => ({
-                    rank: index + 1,
-                    wallet: row.address,
-                    username: row.username,
-                    rankScore: index + 1,
-                    nfts: row.totalmint,
-                    labels: row.categories,
-                    activity: `https://mintpad-trailblazers.vercel.app/activity-example.svg`,
-                    avatar: `https://res.cloudinary.com/twdin/image/upload/v1719839745/avatar-example_mc0r1g.png`,
-                    opensea: row.opensea,
-                    twitter: row.twitter,
-                    blockscan: row.Blockscan,
-                    profile: row.profilepic,
-                }))
-            : { message: 'No records found in the taikocampaign table.' };
-
-        res.json(response);
-    } catch (error) {
-        console.error('Error fetching data from taikocampaign table:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
+}
 
 // Start the server
 app.listen(port, () => {
