@@ -1,20 +1,26 @@
 const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
 const { getDbConnection } = require('./lib/db');
-const fetch = require('node-fetch'); // Make sure to install this package: npm install node-fetch
-const axios = require('axios'); // Import axios
+const { ethers } = require('ethers');
 
 const app = express();
-const port = 1100; // You can use any port number you prefer
+const port = 1000;
 
-app.use(express.json()); // Middleware to parse JSON bodies
+// Middleware to parse JSON bodies
+app.use(express.json());
 
-// Middleware to set CORS headers
-app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    next();
-});
+// Use CORS middleware
+app.use(cors({
+    origin: '*', // Allow all origins
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type']
+}));
+
+// Helper function to convert IPFS URI
+function ipfsToIpfsIo(ipfsUri) {
+    return ipfsUri.replace('ipfs://', 'https://ipfs.io/ipfs/');
+}
 
 // GET /getcollection endpoint
 app.get('/getcollection', async (req, res) => {
@@ -41,6 +47,76 @@ app.get('/getcollection', async (req, res) => {
     }
 });
 
+// GET /fetchContractData endpoint
+app.get('/fetchContractData', async (req, res) => {
+    try {
+        // Fetch collection data from /getcollection endpoint
+        const collectionResponse = await axios.get('http://localhost:1000/getcollection');
+        const collections = collectionResponse.data;
+
+        if (!Array.isArray(collections) || collections.length === 0) {
+            return res.status(404).json({ message: 'No collections found' });
+        }
+
+        // Define the ABI for the contract
+        const abi = [
+            'function name() view returns (string)',
+            'function tokenURI(uint256 tokenId) view returns (string)'
+        ];
+        const provider = new ethers.JsonRpcProvider('https://rpc.hekla.taiko.xyz');
+
+        // Function to fetch and process data from the contract
+        const fetchDataForAddress = async (address) => {
+            try {
+                const contract = new ethers.Contract(address, abi, provider);
+
+                const name = await contract.name();
+
+                // Fetch tokenURI
+                const tokenURI = await contract.tokenURI(0); // Default tokenId is 0
+
+                // Fetch metadata
+                const metadataUrl = ipfsToIpfsIo(tokenURI);
+                const metadataResponse = await axios.get(metadataUrl);
+                const metadata = metadataResponse.data;
+
+                let imageUri = metadata.image;
+                if (imageUri && imageUri.startsWith('ipfs://')) {
+                    imageUri = ipfsToIpfsIo(imageUri);
+                }
+
+                return {
+                    contractAddress: address,
+                    name,
+                    tokenURI,
+                    imageUri
+                };
+            } catch (error) {
+                console.error(`Error fetching data for contract address ${address}:`, error);
+                return {
+                    contractAddress: address,
+                    name: null,
+                    tokenURI: null,
+                    imageUri: null
+                };
+            }
+        };
+
+        // Fetch data for all contract addresses
+        const results = await Promise.all(
+            collections.map(collection => fetchDataForAddress(collection.address))
+        );
+
+        // Filter out unsuccessful fetches
+        const successfulResults = results.filter(result => result.name && result.tokenURI);
+
+        res.json(successfulResults);
+    } catch (error) {
+        console.error('Error fetching contract data:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // GET /mostmint endpoint
 app.get('/mostmint', async (req, res) => {
     // Handle preflight requests
@@ -54,12 +130,7 @@ app.get('/mostmint', async (req, res) => {
         // Get the database connection pool
         const pool = await getDbConnection();
 
-        // Check if the connection is established
-        const isConnected = await checkConnection(pool);
-        if (!isConnected) {
-            return res.status(500).json({ error: 'Database connection failed' });
-        }
-
+        // Execute the query
         const [results] = await pool.query(`
             SELECT * FROM taikocampaign
             ORDER BY totalmint DESC
@@ -84,6 +155,7 @@ app.get('/mostmint', async (req, res) => {
     }
 });
 
+// GET /topcreator endpoint
 app.get('/topcreator', async (req, res) => {
     if (req.method !== 'GET') {
         return res.status(405).json({ error: 'Method not allowed' });
@@ -144,6 +216,7 @@ app.get('/topcreator', async (req, res) => {
     }
 });
 
+// GET /topcollector endpoint
 app.get('/topcollector', async (req, res) => {
     if (req.method !== 'GET') {
         return res.status(405).json({ error: 'Method not allowed' });
@@ -181,83 +254,14 @@ app.get('/mostholder', async (req, res) => {
             return res.json({ message: 'No records found in the collections table.' });
         }
 
-        // Helper function to fetch additional token details
-        const fetchTokenDetails = async (address) => {
-            const apiUrl = `https://blockscoutapi.hekla.taiko.xyz/api?module=token&action=getToken&contractaddress=${address}`;
-
-            try {
-                const response = await fetch(apiUrl);
-                const data = await response.json();
-
-                if (data.status === "1" && data.result && data.result.totalSupply) {
-                    const holdersApiUrl = `https://blockscoutapi.hekla.taiko.xyz/api?module=token&action=getTokenHolders&contractaddress=${address}&page=1&offset=10000`;
-                    const holdersResponse = await fetch(holdersApiUrl);
-                    const holdersData = await holdersResponse.json();
-
-                    if (holdersData.status === "1" && holdersData.result && holdersData.result.length > 0) {
-                        const maxHolder = holdersData.result.reduce((max, holder) => {
-                            return (parseInt(holder.value, 10) > parseInt(max.value, 10)) ? holder : max;
-                        });
-
-                        return {
-                            additionalInfo: data,
-                            tokenHolder: maxHolder
-                        };
-                    }
-                }
-                return { additionalInfo: data, tokenHolder: null };
-            } catch (error) {
-                console.error(`Error fetching token details for address ${address}:`, error);
-                return { additionalInfo: {}, tokenHolder: null };
-            }
-        };
-
-        // Fetch token details concurrently for all results
-        const enhancedResults = await Promise.all(
-            results.map(async (item) => {
-                const tokenDetails = await fetchTokenDetails(item.address);
-
-                return {
-                    address: item.address,
-                    name: item.name,
-                    type: item.type,
-                    symbol: item.symbol,
-                    additionalInfo: tokenDetails.additionalInfo,
-                    tokenHolder: tokenDetails.tokenHolder
-                };
-            })
-        );
-
-        // Sort by totalSupply in descending order
-        enhancedResults.sort((a, b) => {
-            const totalSupplyA = a.additionalInfo && a.additionalInfo.result && a.additionalInfo.result.totalSupply
-                ? parseInt(a.additionalInfo.result.totalSupply, 10)
-                : 0;
-            const totalSupplyB = b.additionalInfo && b.additionalInfo.result && b.additionalInfo.result.totalSupply
-                ? parseInt(b.additionalInfo.result.totalSupply, 10)
-                : 0;
-            return totalSupplyB - totalSupplyA;
-        });
-
-        res.json(enhancedResults);
+        // Return the fetched results
+        res.json(results);
     } catch (error) {
         console.error('Error fetching data:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-// Function to check database connection
-async function checkConnection(pool) {
-    try {
-        await pool.query('SELECT 1');
-        return true;
-    } catch (error) {
-        console.error('Database connection check failed:', error);
-        return false;
-    }
-}
-
-// Start the server
 app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+    console.log(`Server running on port ${port}`);
 });
