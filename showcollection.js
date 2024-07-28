@@ -5,7 +5,7 @@ const { getDbConnection } = require('./lib/db');
 const { ethers } = require('ethers');
 
 const app = express();
-const port = 1000;
+const port = 5000;
 
 // Middleware to parse JSON bodies
 app.use(express.json());
@@ -51,7 +51,7 @@ app.get('/getcollection', async (req, res) => {
 app.get('/fetchContractData', async (req, res) => {
     try {
         // Fetch collection data from /getcollection endpoint
-        const collectionResponse = await axios.get('http://localhost:1000/getcollection');
+        const collectionResponse = await axios.get('http://localhost:5000/getcollection');
         const collections = collectionResponse.data;
 
         if (!Array.isArray(collections) || collections.length === 0) {
@@ -261,6 +261,48 @@ app.get('/mostholder', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
+
+async function fetchCollectionDetails() {
+    try {
+        const response = await axios.get(collectionDetailsUrl);
+        const collections = response.data;
+  
+        const contracts = [];
+  
+        let counter = 1;
+  
+        for (const collection of collections) {
+            const contractAddress = collection.address;
+  
+            const tokenHoldersUrl = `${tokenHoldersBaseUrl}?module=token&action=getTokenHolders&contractaddress=${contractAddress}&page=1&offset=100`;
+            const tokenHoldersResponse = await axios.get(tokenHoldersUrl);
+  
+            const tokenHolders = tokenHoldersResponse.data.result;
+            contracts.push({
+                number: counter,
+                address: contractAddress,
+                holders: tokenHolders.map(holder => holder.address)
+            });
+  
+            counter++;
+        }
+        return {
+            contracts: contracts
+        };
+    } catch (error) {
+        console.error('Error fetching data:', error);
+        return { error: 'Failed to fetch data' };
+    }
+  }
+app.get('/getholderaddress', async (req, res) => {
+    const data = await fetchCollectionDetails();
+    res.json(data);
+  });
+
+
+// update endpoint
+
 
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
