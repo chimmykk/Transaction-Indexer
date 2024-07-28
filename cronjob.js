@@ -7,7 +7,7 @@ const PORT = 1100;
 
 const connection = mysql.createPool({
     host: 'localhost',
-    user: 'rilso',
+    user: 'root',
     password: 'Koireng@1',
     database: 'mydatabase'
 });
@@ -140,6 +140,32 @@ async function updateTopCollectors() {
     }
 }
 
+async function updateTaikoCampaign() {
+    try {
+        const response = await axios.get('http://localhost:6000/fetchviacontract');
+        const data = response.data;
+
+        for (const item of data) {
+            const { holder, totalCount } = item;
+
+            const query = 'SELECT totalmint FROM taikocampaign WHERE address = ?';
+            const [rows] = await connection.promise().query(query, [holder]);
+
+            if (rows.length > 0) {
+                const totalMint = parseInt(rows[0].totalmint, 10) || 0;
+
+                if (totalCount > totalMint) {
+                    const updateQuery = 'UPDATE taikocampaign SET totalmint = ? WHERE address = ?';
+                    await connection.promise().query(updateQuery, [totalCount, holder]);
+                    console.log(`Updated totalmint for holder ${holder} to ${totalCount}`);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error updating Taiko campaign:', error);
+    }
+}
+
 updateTopCollectors().then(() => {
     cron.schedule('*/2 * * * *', () => {
         console.log('Running cron job to update top collectors');
@@ -147,6 +173,11 @@ updateTopCollectors().then(() => {
     });
 }).catch(err => {
     console.error('Initial update failed:', err);
+});
+
+cron.schedule('*/2 * * * *', () => {
+    console.log('Running cron job to update Taiko campaign');
+    updateTaikoCampaign();
 });
 
 app.listen(PORT, () => {
