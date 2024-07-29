@@ -26,17 +26,15 @@ function ipfsToIpfsIo(ipfsUri) {
 
 // GET /getcollection endpoint
 app.get('/getcollection', async (req, res) => {
-    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 1000;
-
     try {
         // Get the database connection pool
         const pool = await getDbConnection();
 
-        // Execute the query
+        // Execute the query with an additional condition for chain_id
         const [results] = await pool.query(`
             SELECT symbol, permalink, address FROM collections
-            LIMIT ?
-        `, [limit]);
+            WHERE chain_id = 167000
+        `);
 
         if (results.length === 0) {
             return res.json({ message: 'No records found in the collections table.' });
@@ -48,6 +46,8 @@ app.get('/getcollection', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
+
 
 // GET /fetchContractData endpoint
 app.get('/fetchContractData', async (req, res) => {
