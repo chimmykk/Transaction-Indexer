@@ -11,7 +11,7 @@ const port = 5000;
 app.use(express.json());
 
 const collectionDetailsUrl = 'http://127.0.0.1:6000/collectiondetails';
-const tokenHoldersBaseUrl = 'https://blockscoutapi.hekla.taiko.xyz/api';
+const tokenHoldersBaseUrl = 'https://blockscoutapi.mainnet.taiko.xyz/api';
 // Use CORS middleware
 app.use(cors({
     origin: 'http://localhost:3000', // Replace with your actual domain
@@ -173,7 +173,7 @@ app.get('/topcreator', async (req, res) => {
 
         // Function to fetch contract deployer details
         const fetchContractDeployer = async (contractAddress) => {
-            const apiUrl = 'https://blockscoutapi.hekla.taiko.xyz/api';
+            const apiUrl = 'https://blockscoutapi.mainnet.taiko.xyz/api';
 
             try {
                 const response = await axios.get(apiUrl, {
