@@ -32,9 +32,10 @@ app.get('/getcollection', async (req, res) => {
         // Get the database connection pool
         const pool = await getDbConnection();
 
-        // Execute the query
+        // Execute the query with an additional condition for chain_id
         const [results] = await pool.query(`
             SELECT symbol, permalink, address FROM collections
+            WHERE chain_id = 167000
             LIMIT ?
         `, [limit]);
 
@@ -48,6 +49,7 @@ app.get('/getcollection', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
 
 // GET /fetchContractData endpoint
 app.get('/fetchContractData', async (req, res) => {
