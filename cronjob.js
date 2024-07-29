@@ -12,6 +12,8 @@ const connection = mysql.createPool({
     database: 'mydatabase'
 });
 
+// maybe config, or .env ( will just leave it) 
+
 connection.getConnection((err, conn) => {
     if (err) {
         console.error('Error connecting to MySQL:', err);
@@ -22,7 +24,7 @@ connection.getConnection((err, conn) => {
 });
 
 async function fetchContractDeployer(contractAddress) {
-    const apiUrl = 'https://blockscoutapi.hekla.taiko.xyz/api';
+    const apiUrl = 'https://blockscoutapi.mainnet.taiko.xyz/api';
 
     try {
         const response = await axios.get(apiUrl, {
@@ -104,7 +106,7 @@ async function updateTopCollectors() {
         }
 
         // Fetch data from second source
-        const response2 = await axios.get('https://semjjonline.xyz/gettopcollector');
+        const response2 = await axios.get('https://semjjonline.xyz/gettopcollector'); // this one should points towards your endpoint
         const data2 = response2.data;
 
         const sortedCollectors = data2.sort((a, b) => b.totalTransactions - a.totalTransactions);
