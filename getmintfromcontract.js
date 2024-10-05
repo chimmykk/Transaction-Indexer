@@ -65,26 +65,50 @@
         const collections = collectionResponse.data;
 
         const contracts = [];
+        const holderCountMap = {}; 
 
         for (const collection of collections) {
             const contractAddress = collection.house;
             const collectionDetails = await fetchCollectionDetails(contractAddress);
         
             const holderCount = collectionDetails.holders.length;
-
             contracts.push({
                 address: collectionDetails.address,
                 holders: collectionDetails.holders,
                 count: holderCount
             });
+
+            for (const holder of collectionDetails.holders) {
+                if (holderCountMap[holder]) {
+                    holderCountMap[holder].count += 1;
+                    holderCountMap[holder].contracts.push(collectionDetails.address); 
+                } else {
+                    holderCountMap[holder] = {
+                        count: 1, // Initialize count
+                        contracts: [collectionDetails.address]
+                    };
+                }
+            }
         }
 
-        res.status(200).json({ contracts });
+        const aggregatedHolders = Object.entries(holderCountMap).map(([address, data]) => ({
+            address,
+            count: data.count,
+            occurrences: data.contracts 
+        }));
+
+        res.status(200).json({ 
+            contracts,
+            aggregatedHolders 
+        });
     } catch (error) {
         console.error('Error fetching collection details:', error);
         res.status(500).json({ error: 'Failed to fetch collection details' });
     }
 });
+
+ 
+
  
  app.listen(PORT, () => {
      console.log(`Server is running on http://localhost:${PORT}`);
