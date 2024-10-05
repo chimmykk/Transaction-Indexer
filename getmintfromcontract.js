@@ -1,11 +1,7 @@
- /* Get mint from contract
- Set-up a cron job that automatically trigger every 2 hours to checks and compare 
- Taikocampagin collections totatmints delta vs the data feed from this.
-
- Constraints of 2-3ms for every fetch and store to database, to control
- Rate limits
+  /* Get mint from contract
+  -> Fetch the collection's address from the databases, reverse the contract address
+  -> To fetch the holders based on the collection's address(contract address)
  */
-
  const express = require('express');
  const axios = require('axios');
  const cors = require('cors');
@@ -64,27 +60,32 @@
  
  // Endpoint to fetch collection details using addresses from the database
  app.get('/api/fetchcollectiondetails', async (req, res) => {
-     try {
-         // Fetch collection addresses first
-         const collectionResponse = await axios.get('http://localhost:6000/api/getcollectionaddress');
-         const collections = collectionResponse.data;
+    try {
+        const collectionResponse = await axios.get('http://localhost:6000/api/getcollectionaddress');
+        const collections = collectionResponse.data;
+
+        const contracts = [];
+
+        for (const collection of collections) {
+            const contractAddress = collection.house;
+            const collectionDetails = await fetchCollectionDetails(contractAddress);
+        
+            const holderCount = collectionDetails.holders.length;
+
+            contracts.push({
+                address: collectionDetails.address,
+                holders: collectionDetails.holders,
+                count: holderCount
+            });
+        }
+
+        res.status(200).json({ contracts });
+    } catch (error) {
+        console.error('Error fetching collection details:', error);
+        res.status(500).json({ error: 'Failed to fetch collection details' });
+    }
+});
  
-         const contracts = [];
- 
-         for (const collection of collections) {
-             const contractAddress = collection.house; // Access the address from the fetched data
-             const collectionDetails = await fetchCollectionDetails(contractAddress);
-             contracts.push(collectionDetails);
-         }
- 
-         res.status(200).json({ contracts });
-     } catch (error) {
-         console.error('Error fetching collection details:', error);
-         res.status(500).json({ error: 'Failed to fetch collection details' });
-     }
- });
- 
- // Start the server
  app.listen(PORT, () => {
      console.log(`Server is running on http://localhost:${PORT}`);
  });
