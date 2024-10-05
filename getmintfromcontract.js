@@ -84,7 +84,7 @@
                     holderCountMap[holder].contracts.push(collectionDetails.address); 
                 } else {
                     holderCountMap[holder] = {
-                        count: 1, // Initialize count
+                        count: 1, 
                         contracts: [collectionDetails.address]
                     };
                 }
