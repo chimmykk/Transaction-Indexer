@@ -159,7 +159,7 @@ app.get('/checktxn/:txnhash', async (req, res) => {
       res.status(500).json({ error: 'Failed to fetch transaction status' });
     }
   });
-  
+  /* Get all the tokens mints from distinct wallet address wrt to house(diff contrac address) */
   app.get('/api/gettotalmint', (req, res) => {
     const query = `
         SELECT address, SUM(totalmint) AS totalMint 
@@ -180,7 +180,7 @@ app.get('/checktxn/:txnhash', async (req, res) => {
         res.status(200).json(results); // Return all results
     });
 });
-
+/* Get all the collecion deployed */
 app.get('/api/getcollectionaddress', (req, res) => {
     const query = `
         SELECT DISTINCT house 
@@ -200,7 +200,45 @@ app.get('/api/getcollectionaddress', (req, res) => {
         res.status(200).json(results); // Return all distinct houses
     });
 });
-
+const collectionDetailsUrl="http://127.0.0.1:5050/getcollectionaddress";
+const tokenHoldersBaseUrl = 'https://blockscoutapi.hekla.taiko.xyz/api';
+/* Verify mints on smart contract(get mints from contracts) */
+async function fetchCollectionDetails() {
+    try {
+      const response = await axios.get(collectionDetailsUrl);
+      const collections = response.data;
+  
+      const contracts = [];
+  
+      let counter = 1;
+  
+      for (const collection of collections) {
+        const contractAddress = collection.address;
+  
+        const tokenHoldersUrl = `${tokenHoldersBaseUrl}?module=token&action=getTokenHolders&contractaddress=${contractAddress}&page=1&offset=1000`;
+        const tokenHoldersResponse = await axios.get(tokenHoldersUrl);
+  
+        const tokenHolders = tokenHoldersResponse.data.result;
+        contracts.push({
+          number: counter,
+          address: contractAddress,
+          holders: tokenHolders.map(holder => holder.address)
+        });
+  
+        counter++;
+      }
+      return {
+        contracts: contracts
+      };
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      return { error: 'Failed to fetch data' };
+    }
+  }
+  app.get('/api/getholderaddress', async (req, res) => {
+    const data = await fetchCollectionDetails();
+    res.json(data);
+  });
   
   app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
