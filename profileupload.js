@@ -8,7 +8,7 @@ const port = 5050;
 
 app.use(bodyParser.json());
 const API_KEY = 'APUVAUXICC2927IVW8RDN4W6Q6FWTFNHV8'; 
-const BLOCKSCOUT_API_URL = 'https://blockscoutapi.hekla.taiko.xyz/api';
+// const BLOCKSCOUT_API_URL = 'https://blockscoutapi.hekla.taiko.xyz/api';
 app.use(cors({
     origin: 'http://127.0.0.1:8000',
     methods: ['POST','GET'],
@@ -197,12 +197,132 @@ app.get('/api/getcollectionaddress', (req, res) => {
             return res.status(404).json({ message: 'No data found' });
         }
 
-        res.status(200).json(results); // Return all distinct houses
+        res.status(200).json(results); 
     });
 });
+/*  Get the top mints
+    Which means the address that minted every collecion available.
+ */
 
+app.get('/api/getranksmostmint', async (req, res) => {
+    try {
+        // Fetch data from the gettotalmint API
+        const response = await axios.get('http://localhost:5050/api/gettotalmint');
+        
+        const results = response.data;
 
+        if (!results || results.length === 0) {
+            return res.status(404).json({ message: 'No data found' });
+        }
 
+        // Add ranks based on totalMint
+        const rankedResults = results.map((item, index) => ({
+            rank: index + 1,
+        holder: item.address,
+            points: item.totalMint
+        }));
+
+        res.status(200).json(rankedResults);
+    } catch (err) {
+        console.error('Error fetching ranks:', err.message);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/*  Get the top creator
+    Which means the address that created the most successfull collection.
+    Reverse the address of the contract creator of the top mints
+ */
+    app.get('/api/gettopcreator', async (req, res) => {
+        try {
+            // Fetch data from the gettotalmint API
+            const response = await axios.get('http://localhost:5050/api/gettotalmint');
+            
+            const results = response.data;
+    
+            if (!results || results.length === 0) {
+                return res.status(404).json({ message: 'No data found' });
+            }
+    
+            // Add ranks based on totalMint
+            const rankedResults = results.map((item, index) => ({
+                rank: index + 1,
+            holder: item.address,
+                points: item.totalMint
+            }));
+    
+            res.status(200).json(rankedResults);
+        } catch (err) {
+            console.error('Error fetching ranks:', err.message);
+            return res.status(500).json({ error: 'Internal server error' });
+        }
+    });
+
+    /*  Get the top collector
+        Which means an address that collects every unique NFTs
+        available (Not on basis of most collection but collecting all unique 1:1 collection)
+ */
+
+        app.get('/api/gettopcollector', async (req, res) => {
+            try {
+                // Step 1: Get the top collector
+                const collectorQuery = `
+                    SELECT 
+                        address, 
+                        COUNT(DISTINCT house) AS houseCount, 
+                        SUM(totalMint) AS totalMint
+                    FROM 
+                        taikocampaign
+                    GROUP BY 
+                        address
+                    HAVING 
+                        houseCount = (SELECT COUNT(DISTINCT house) FROM taikocampaign)
+                    ORDER BY 
+                        totalMint DESC
+                    LIMIT 1;
+                `;
+        
+                const collectorResults = await new Promise((resolve, reject) => {
+                    connection.query(collectorQuery, (err, results) => {
+                        if (err) return reject(err);
+                        resolve(results);
+                    });
+                });
+        
+                if (collectorResults.length === 0) {
+                    return res.status(404).json({ message: 'No top collector found' });
+                }
+        
+                const topCollector = collectorResults[0];
+        
+                // Step 2: Fetch the houses and house names for the top collector
+                const housesQuery = `
+                    SELECT DISTINCT house, houseName 
+                    FROM taikocampaign 
+                    WHERE address = ?;
+                `;
+        
+                const housesResults = await new Promise((resolve, reject) => {
+                    connection.query(housesQuery, [topCollector.address], (err, results) => {
+                        if (err) return reject(err);
+                        resolve(results);
+                    });
+                });
+        
+                // Combine the results
+                const response = {
+                    address: topCollector.address,
+                    houseCount: topCollector.houseCount,
+                    totalMint: topCollector.totalMint,
+                    houses: housesResults.map(h => `${h.house}, ${h.houseName}`) // Format as "address, houseName"
+                };
+        
+                res.status(200).json(response);
+            } catch (err) {
+                console.error('Error fetching top collector:', err.message);
+                return res.status(500).json({ error: 'Internal server error' });
+            }
+        });        
   
   app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
