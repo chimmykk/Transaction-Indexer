@@ -203,37 +203,7 @@ app.get('/api/getcollectionaddress', (req, res) => {
 /*  Get the top mints
     Which means the address that minted every collecion available.
  */
-
-app.get('/api/getranksmostmint', async (req, res) => {
-    try {
-        // Fetch data from the gettotalmint API
-        const response = await axios.get('http://localhost:5050/api/gettotalmint');
-        
-        const results = response.data;
-
-        if (!results || results.length === 0) {
-            return res.status(404).json({ message: 'No data found' });
-        }
-
-        // Add ranks based on totalMint
-        const rankedResults = results.map((item, index) => ({
-            rank: index + 1,
-        holder: item.address,
-            points: item.totalMint
-        }));
-
-        res.status(200).json(rankedResults);
-    } catch (err) {
-        console.error('Error fetching ranks:', err.message);
-        return res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-/*  Get the top creator
-    Which means the address that created the most successfull collection.
-    Reverse the address of the contract creator of the top mints
- */
-    app.get('/api/gettopcreator', async (req, res) => {
+    app.get('/api/getranksmostmint', async (req, res) => {
         try {
             // Fetch data from the gettotalmint API
             const response = await axios.get('http://localhost:5050/api/gettotalmint');
@@ -244,12 +214,53 @@ app.get('/api/getranksmostmint', async (req, res) => {
                 return res.status(404).json({ message: 'No data found' });
             }
     
-            // Add ranks based on totalMint
-            const rankedResults = results.map((item, index) => ({
-                rank: index + 1,
-            holder: item.address,
-                points: item.totalMint
-            }));
+            // Create a map to hold each address's total mints and houses
+            const rankedResultsMap = {};
+    
+            // Iterate through each result and populate the map
+            for (const item of results) {
+                const { address, totalMint } = item;
+    
+                if (!rankedResultsMap[address]) {
+                    rankedResultsMap[address] = {
+                        address,
+                        totalMint: 0,
+                        houses: []
+                    };
+                }
+    
+                // Aggregate totalMint
+                rankedResultsMap[address].totalMint += totalMint;
+    
+                const housesQuery = `
+                    SELECT house, houseName, totalMint 
+                    FROM taikocampaign 
+                    WHERE address = ?;
+                `;
+                const housesResults = await new Promise((resolve, reject) => {
+                    connection.query(housesQuery, [address], (err, results) => {
+                        if (err) return reject(err);
+                        resolve(results);
+                    });
+                });
+    
+                // Add houses to the map as formatted strings
+                for (const house of housesResults) {
+                    rankedResultsMap[address].houses.push(
+                        `${house.house}, ${house.houseName}, ${house.totalMint}` // Format as "address, name, points"
+                    );
+                }
+            }
+    
+            // Convert the map to an array and sort by totalMint
+            const rankedResults = Object.values(rankedResultsMap)
+                .sort((a, b) => b.totalMint - a.totalMint) // Sort by totalMint in descending order
+                .map((item, index) => ({
+                    rank: index + 1,
+                    holder: item.address,
+                    totalMint: item.totalMint,
+                    houses: item.houses // Houses are now formatted strings
+                }));
     
             res.status(200).json(rankedResults);
         } catch (err) {
@@ -257,15 +268,96 @@ app.get('/api/getranksmostmint', async (req, res) => {
             return res.status(500).json({ error: 'Internal server error' });
         }
     });
-
+    
+    
+/*  Get the top creator
+    Which means the address that created the most successfull collection.
+    Reverse the address of the contract creator of the top mints
+ */
+    app.get('/api/gettopcreator', async (req, res) => {
+        try {
+            // Fetch data from the gettotalmint API
+            const responseFromApi = await axios.get('http://localhost:5050/api/gettotalmint');
+            const results = responseFromApi.data;
+    
+            if (!results || results.length === 0) {
+                return res.status(404).json({ message: 'No data found' });
+            }
+    
+            // Create a map to hold each address's total mints and houses
+            const creatorMap = {};
+    
+            // Iterate through each result and populate the map
+            for (const item of results) {
+                const { address, totalMint } = item;
+    
+                if (!creatorMap[address]) {
+                    creatorMap[address] = {
+                        address,
+                        totalMint: Number(totalMint), // Ensure totalMint is a number
+                        houses: []
+                    };
+                } else {
+                    // Only set totalMint if it's not already there (to avoid duplication)
+                    creatorMap[address].totalMint += Number(totalMint);
+                }
+    
+                // Fetch houses interacted for the current address
+                const housesQuery = `
+                    SELECT house, houseName, totalMint 
+                    FROM taikocampaign 
+                    WHERE address = ?;
+                `;
+                const housesResults = await new Promise((resolve, reject) => {
+                    connection.query(housesQuery, [address], (err, results) => {
+                        if (err) return reject(err);
+                        resolve(results);
+                    });
+                });
+    
+                // Add houses to the map
+                for (const house of housesResults) {
+                    const { house: houseAddress, houseName, totalMint: houseMint } = house;
+    
+                    // Push house details into the creator map
+                    creatorMap[address].houses.push({
+                        address: houseAddress,
+                        name: houseName,
+                        points: houseMint 
+                    });
+                }
+            }
+    
+            // Convert the map to an array
+            const creatorResults = Object.values(creatorMap);
+    
+            // Sort creators based on totalMint in descending order
+            const sortedCreators = creatorResults.sort((a, b) => b.totalMint - a.totalMint);
+    
+            // Prepare the response, formatting the houses and adding ranks
+            const formattedCreators = sortedCreators.map((creator, index) => ({
+                rank: index + 1, // Assign rank based on index
+                address: creator.address,
+                totalMint: creator.totalMint,
+                houses: creator.houses.map(house => 
+                    `${house.address}, ${house.name}, ${house.points}`
+                ) // House addresses and names formatted as required
+            }));
+    
+            res.status(200).json(formattedCreators);
+        } catch (err) {
+            console.error('Error fetching top creator:', err.message);
+            return res.status(500).json({ error: 'Internal server error' });
+        }
+    });
+    
     /*  Get the top collector
         Which means an address that collects every unique NFTs
         available (Not on basis of most collection but collecting all unique 1:1 collection)
  */
-
         app.get('/api/gettopcollector', async (req, res) => {
             try {
-                // Step 1: Get the top collector
+                // Step 1: Get all collectors
                 const collectorQuery = `
                     SELECT 
                         address, 
@@ -274,14 +366,9 @@ app.get('/api/getranksmostmint', async (req, res) => {
                     FROM 
                         taikocampaign
                     GROUP BY 
-                        address
-                    HAVING 
-                        houseCount = (SELECT COUNT(DISTINCT house) FROM taikocampaign)
-                    ORDER BY 
-                        totalMint DESC
-                    LIMIT 1;
+                        address;
                 `;
-        
+                
                 const collectorResults = await new Promise((resolve, reject) => {
                     connection.query(collectorQuery, (err, results) => {
                         if (err) return reject(err);
@@ -290,39 +377,58 @@ app.get('/api/getranksmostmint', async (req, res) => {
                 });
         
                 if (collectorResults.length === 0) {
-                    return res.status(404).json({ message: 'No top collector found' });
+                    return res.status(404).json({ message: 'No collectors found' });
                 }
         
-                const topCollector = collectorResults[0];
-        
-                // Step 2: Fetch the houses and house names for the top collector
+                // Step 2: Fetch the houses and house names for each collector
                 const housesQuery = `
-                    SELECT DISTINCT house, houseName 
+                    SELECT DISTINCT address, house, houseName 
                     FROM taikocampaign 
-                    WHERE address = ?;
+                    WHERE address IN (?);
                 `;
         
+                // Extract all addresses to query houses
+                const allAddresses = collectorResults.map(collector => collector.address);
+        
                 const housesResults = await new Promise((resolve, reject) => {
-                    connection.query(housesQuery, [topCollector.address], (err, results) => {
+                    connection.query(housesQuery, [allAddresses], (err, results) => {
                         if (err) return reject(err);
                         resolve(results);
                     });
                 });
         
                 // Combine the results
-                const response = {
-                    address: topCollector.address,
-                    houseCount: topCollector.houseCount,
-                    totalMint: topCollector.totalMint,
-                    houses: housesResults.map(h => `${h.house}, ${h.houseName}`) // Format as "address, houseName"
-                };
+                const response = collectorResults.map(collector => {
+                    const collectorHouses = housesResults
+                        .filter(h => h.address === collector.address)
+                        .map(h => `${h.house}, ${h.houseName}`);
         
-                res.status(200).json(response);
+                    return {
+                        address: collector.address,
+                        houseCount: collector.houseCount,
+                        totalMint: collector.totalMint,
+                        houses: collectorHouses,
+                    };
+                });
+        
+                // Step 3: Sort collectors by totalMint in descending order
+                response.sort((a, b) => b.totalMint - a.totalMint);
+        
+                // Step 4: Assign ranks based on sorted order
+                const rankedResponse = response.map((collector, index) => ({
+                    rank: index + 1, // Rank 1 for highest totalMint
+                    address: collector.address,
+                    totalMint: collector.totalMint,
+                    houses: collector.houses, // Keep the houses as they are
+                }));
+        
+                res.status(200).json(rankedResponse);
             } catch (err) {
-                console.error('Error fetching top collector:', err.message);
+                console.error('Error fetching collectors:', err.message);
                 return res.status(500).json({ error: 'Internal server error' });
             }
-        });        
+        });
+        
   
   app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
