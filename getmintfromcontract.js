@@ -6,13 +6,13 @@
 const axios = require('axios');
 const cors = require('cors');
 const mysql = require('mysql2');
-const Queue = require('bull'); // Correct import for Bull v3
+const Queue = require('bull');
 
-const requestQueue = new Queue('requestQueue'); // Create a new Queue instance
+const requestQueue = new Queue('requestQueue');
 
 const app = express();
 const PORT = 6000;
-const BLOCKSCOUT_API_URL = 'https://blockscoutapi.hekla.taiko.xyz/api';
+// const BLOCKSCOUT_API_URL = 'https://blockscoutapi.hekla.taiko.xyz/api';
 
 app.use(cors());
 
@@ -73,10 +73,9 @@ requestQueue.process(async (job) => {
   }
   
   // API endpoint to fetch collection details using addresses from the database
-// API endpoint to fetch collection details and aggregate token balances by address
-app.get('/api/fetchcollectiondetails', async (req, res) => {
+  app.get('/api/fetchcollectiondetails', async (req, res) => {
     const query = `
-        SELECT address, house
+        SELECT address, house, totalmint AS storedTokenBalance
         FROM taikocampaign
     `;
 
@@ -93,43 +92,58 @@ app.get('/api/fetchcollectiondetails', async (req, res) => {
         const holderMap = {};
 
         for (const result of results) {
-            const { address, house: contractAddress } = result;
-
-            // Fetch token balance using the contract address (house) and holder address
+            const { address, house: contractAddress, storedTokenBalance } = result;
             const tokenBalanceUrl = `https://blockscoutapi.hekla.taiko.xyz/api?module=account&action=tokenbalance&contractaddress=${contractAddress}&address=${address}`;
 
             try {
                 const tokenBalanceResponse = await axios.get(tokenBalanceUrl);
-                const tokenBalance = parseInt(tokenBalanceResponse.data.result || '0', 10); // Ensure numeric token balance
-
-                // Aggregate token balances and contract addresses (houses) by address
+                const fetchedTokenBalance = parseInt(tokenBalanceResponse.data.result || '0', 10); 
                 if (holderMap[address]) {
-                    holderMap[address].aggregatepoints += tokenBalance;
+                    holderMap[address].aggregatepoints += fetchedTokenBalance;
                     holderMap[address].houses.push({
                         house: contractAddress,
-                        tokenBalance: tokenBalance
+                        tokenBalance: fetchedTokenBalance
                     });
                 } else {
                     holderMap[address] = {
                         address,
-                        aggregatepoints: tokenBalance,
+                        aggregatepoints: fetchedTokenBalance,
                         houses: [{
                             house: contractAddress,
-                            tokenBalance: tokenBalance
+                            tokenBalance: fetchedTokenBalance
                         }]
                     };
+                }
+
+                // Compare fetched token balance with stored totalmint value in the DB
+                if (fetchedTokenBalance > parseInt(storedTokenBalance || '0', 10)) {
+                    // Update the 'totalmint' field with the new, greater token balance
+                    const updateQuery = `
+                        UPDATE taikocampaign
+                        SET totalmint = ?
+                        WHERE address = ? AND house = ?
+                    `;
+                    connection.query(updateQuery, [fetchedTokenBalance, address, contractAddress], (updateErr) => {
+                        if (updateErr) {
+                            console.error(`Error updating token balance for ${address} and ${contractAddress}:`, updateErr.stack);
+                        } else {
+                            console.log(`Updated totalmint for ${address} at ${contractAddress} to ${fetchedTokenBalance}`);
+                        }
+                    });
                 }
             } catch (error) {
                 console.error(`Error fetching balance for ${address} and ${contractAddress}:`, error);
             }
         }
 
-        const aggregatedData = Object.values(holderMap)
+        const aggregatedData = Object.values(holderMap);
+
         res.status(200).json({
             aggregatedData
         });
     });
 });
+
 
 
   app.listen(PORT, () => {
