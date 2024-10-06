@@ -53,24 +53,7 @@ requestQueue.process(async (job) => {
       });
   });
   
-  // Function to fetch collection details
-  async function fetchCollectionDetails(contractAddress) {
-      const tokenHoldersBaseUrl = 'https://blockscoutapi.hekla.taiko.xyz/api'; // Base URL for token holders
-  
-      try {
-          const tokenHoldersUrl = `${tokenHoldersBaseUrl}?module=token&action=getTokenHolders&contractaddress=${contractAddress}&page=1&offset=1000`;
-          const tokenHoldersResponse = await axios.get(tokenHoldersUrl);
-          const tokenHolders = tokenHoldersResponse.data.result || []; // Handle undefined result
-  
-          return {
-              address: contractAddress,
-              holders: tokenHolders.map(holder => holder.address)
-          };
-      } catch (error) {
-          console.error(`Error fetching data for ${contractAddress}:`, error);
-          return { error: 'Failed to fetch data' };
-      }
-  }
+
   
   // API endpoint to fetch collection details using addresses from the database
   app.get('/api/fetchcollectiondetails', async (req, res) => {

@@ -10,11 +10,10 @@ app.use(bodyParser.json());
 const API_KEY = 'APUVAUXICC2927IVW8RDN4W6Q6FWTFNHV8'; 
 // const BLOCKSCOUT_API_URL = 'https://blockscoutapi.hekla.taiko.xyz/api';
 app.use(cors({
-    origin: 'http://127.0.0.1:8000',
-    methods: ['POST','GET'],
+    origin: ['http://127.0.0.1:5050', 'http://localhost:3000'], // Allow both localhost and 127.0.0.1
+    methods: ['POST', 'GET'],
     allowedHeaders: ['Content-Type'],
 }));
-
 const connection = mysql.createConnection({
     host: 'localhost',
     user: 'root',
@@ -380,49 +379,68 @@ app.get('/api/getcollectionaddress', (req, res) => {
                     return res.status(404).json({ message: 'No collectors found' });
                 }
         
-                // Step 2: Fetch the houses and house names for each collector
-                const housesQuery = `
-                    SELECT DISTINCT address, house, houseName 
-                    FROM taikocampaign 
-                    WHERE address IN (?);
-                `;
+                // Create a map to hold each address's total mints and houses
+                const collectorMap = {};
         
-                // Extract all addresses to query houses
-                const allAddresses = collectorResults.map(collector => collector.address);
+                // Iterate through each collector result and populate the map
+                for (const collector of collectorResults) {
+                    const { address, totalMint } = collector;
         
-                const housesResults = await new Promise((resolve, reject) => {
-                    connection.query(housesQuery, [allAddresses], (err, results) => {
-                        if (err) return reject(err);
-                        resolve(results);
+                    if (!collectorMap[address]) {
+                        collectorMap[address] = {
+                            address,
+                            totalMint: Number(totalMint), // Ensure totalMint is a number
+                            houses: []
+                        };
+                    } else {
+                        // Accumulate totalMint if address already exists
+                        collectorMap[address].totalMint += Number(totalMint);
+                    }
+        
+                    // Fetch houses and their points for the current address
+                    const housesQuery = `
+                        SELECT house, houseName, totalMint AS points 
+                        FROM taikocampaign 
+                        WHERE address = ?;
+                    `;
+                    const housesResults = await new Promise((resolve, reject) => {
+                        connection.query(housesQuery, [address], (err, results) => {
+                            if (err) return reject(err);
+                            resolve(results);
+                        });
                     });
-                });
         
-                // Combine the results
-                const response = collectorResults.map(collector => {
-                    const collectorHouses = housesResults
-                        .filter(h => h.address === collector.address)
-                        .map(h => `${h.house}, ${h.houseName}`);
+                    // Add houses to the map
+                    for (const house of housesResults) {
+                        const { house: houseAddress, houseName, points } = house;
         
-                    return {
-                        address: collector.address,
-                        houseCount: collector.houseCount,
-                        totalMint: collector.totalMint,
-                        houses: collectorHouses,
-                    };
-                });
+                        // Push house details into the collector map
+                        collectorMap[address].houses.push({
+                            address: houseAddress,
+                            name: houseName,
+                            points // Include points for the house
+                        });
+                    }
+                }
         
-                // Step 3: Sort collectors by totalMint in descending order
-                response.sort((a, b) => b.totalMint - a.totalMint);
+                // Convert the map to an array
+                const collectorResultsArray = Object.values(collectorMap);
         
-                // Step 4: Assign ranks based on sorted order
-                const rankedResponse = response.map((collector, index) => ({
-                    rank: index + 1, // Rank 1 for highest totalMint
-                    address: collector.address,
-                    totalMint: collector.totalMint,
-                    houses: collector.houses, // Keep the houses as they are
-                }));
+                // Sort collectors based on totalMint in descending order
+                collectorResultsArray.sort((a, b) => b.totalMint - a.totalMint);
         
-                res.status(200).json(rankedResponse);
+                // Prepare the response, formatting the houses and adding ranks
+const formattedCollectors = collectorResultsArray.map((collector, index) => ({
+    rank: index + 1, // Assign rank based on index
+    address: collector.address,
+    totalMint: collector.totalMint,
+    houses: collector.houses.map(house => 
+        `${house.address}, ${house.name}, ${house.points}` // Format houses as required
+    ) // Now each house will be a string
+}));
+
+        
+                res.status(200).json(formattedCollectors);
             } catch (err) {
                 console.error('Error fetching collectors:', err.message);
                 return res.status(500).json({ error: 'Internal server error' });
@@ -430,6 +448,59 @@ app.get('/api/getcollectionaddress', (req, res) => {
         });
         
   
+        app.get('/gettaikocollection', (req, res) => {
+            const query = `
+                SELECT * 
+                FROM collections
+                WHERE chain_id = 167009
+                ORDER BY created_at DESC
+                LIMIT 15
+            `;
+        
+            connection.query(query, (err, results) => {
+                if (err) {
+                    console.error('Error fetching collections:', err.stack);
+                    return res.status(500).json({ error: 'Internal server error' });
+                }
+        
+                if (results.length === 0) {
+                    return res.status(404).json({ message: 'No data found' });
+                }
+        
+                res.status(200).json(results); 
+            });
+        });
+
+      /* Get all collections ranked by total mints */
+app.get('/topcollection', (req, res) => {
+    const query = `
+        SELECT house, COUNT(house) AS house_count, SUM(CAST(totalmint AS UNSIGNED)) AS total_mint
+        FROM taikocampaign
+        GROUP BY house
+        ORDER BY total_mint DESC;  -- Order by total_mint for ranking
+    `;
+    
+    connection.query(query, (error, results) => {
+        if (error) {
+            console.error('Error fetching top collections: ' + error);
+            return res.status(500).json({ error: 'Database query error' });
+        }
+        
+        if (results.length === 0) {
+            return res.status(404).json({ message: 'No houses found' });
+        }
+
+        // Add rank to each collection based on total_mint
+        const rankedResults = results.map((item, index) => ({
+            ...item,
+            rank: index + 1 // Rank starts at 1
+        }));
+
+        res.json(rankedResults); // Return all houses with their count, total mint, and rank
+    });
+});
+
+        
   app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
