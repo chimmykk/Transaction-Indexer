@@ -500,7 +500,41 @@ app.get('/topcollection', (req, res) => {
     });
 });
 
-        
+/* Get the permalink of the contract address
+    Pass the contract address and get the permalink for the 
+    mint section on the site
+*/
+       
+app.get('/api/getpermalink/address/:address', (req, res) => {
+    const address = req.params.address; // Get the address from the route parameter
+    const chainId = 167009; // Set the chain ID
+
+    // Check if the address is provided
+    if (!address) {
+        return res.status(400).json({ error: 'Address is required' });
+    }
+
+    const query = `
+        SELECT permalink 
+        FROM collections 
+        WHERE address = ? AND chain_id = ?
+    `;
+
+    connection.query(query, [address, chainId], (err, results) => {
+        if (err) {
+            console.error('Error fetching permalink:', err.stack);
+            return res.status(500).json({ error: 'Internal server error' });
+        }
+
+        if (results.length === 0) {
+            return res.status(404).json({ message: 'No permalink found for the given address' });
+        }
+
+        res.status(200).json(results[0]); // Return the first result (the permalink)
+    });
+});
+
+
   app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
