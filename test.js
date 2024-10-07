@@ -1,9 +1,11 @@
 const express = require('express');
-const app = express();
-const PORT = 3030;
+const Queue = require('bee-queue');
 const cors = require('cors');
 
-// Test CORS setup
+const app = express();
+const PORT = 3030;
+
+// CORS setup
 app.use(cors({
     origin: 'http://127.0.0.1:8000',
     methods: ['POST', 'GET'],
@@ -12,17 +14,16 @@ app.use(cors({
 
 app.use(express.json());
 
-app.post('/startPolling', async (req, res) => {
-    const { txHash, wallet, collection } = req.body;
-    if (!txHash || !wallet || !collection) {
-        return res.status(400).json({ error: 'Transaction hash, wallet, and collection data are required' });
-    }
+// Create a queue for polling transactions
+const pollingQueue = new Queue('pollingQueue');
 
-    pollTransactionStatus(txHash, wallet, collection);
-
-    res.status(200).json({ message: 'Polling started' });
+// Job Processor
+pollingQueue.process(async (job) => {
+    const { txHash, wallet, collection } = job.data;
+    await pollTransactionStatus(txHash, wallet, collection);
 });
 
+// Function to check the transaction status
 const checkTransactionStatus = async (txHash) => {
     const fetch = (await import('node-fetch')).default;
     const response = await fetch(`http://localhost:5050/checktxnhekla/${encodeURIComponent(txHash)}`, {
@@ -32,24 +33,22 @@ const checkTransactionStatus = async (txHash) => {
         },
     });
 
-    // if (!response.ok) {
-    //     throw new Error('Failed to fetch transaction status');
-    // }
+    if (!response.ok) {
+        throw new Error('Failed to fetch transaction status');
+    }
 
     return response.json();
 };
 
-
-const pollTransactionStatus = async (txHash, wallet, collection, contractdata, interval = 5000, maxAttempts = 20) => {
-    const fetch = (await import('node-fetch')).default;
-
+// Function to poll transaction status
+const pollTransactionStatus = async (txHash, wallet, collection, interval = 5000, maxAttempts = 20) => {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const result = await checkTransactionStatus(txHash);
         console.log('Transaction status:', result.message);
 
         if (result.message === 'success') {
             try {
-                // Send player details directly to the API, which will handle the logic
+                const fetch = (await import('node-fetch')).default;
                 const playerDetailsResponse = await fetch('http://localhost:5050/api/playerdetails', {
                     method: 'POST',
                     headers: {
@@ -82,8 +81,20 @@ const pollTransactionStatus = async (txHash, wallet, collection, contractdata, i
     console.log('Transaction confirmation timed out or failed');
 };
 
+// Endpoint to start polling
+app.post('/startPolling', async (req, res) => {
+    const { txHash, wallet, collection } = req.body;
+    if (!txHash || !wallet || !collection) {
+        return res.status(400).json({ error: 'Transaction hash, wallet, and collection data are required' });
+    }
 
+    // Add job to the queue
+    pollingQueue.createJob({ txHash, wallet, collection }).save();
 
+    res.status(200).json({ message: 'Polling started' });
+});
+
+// Start server
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
