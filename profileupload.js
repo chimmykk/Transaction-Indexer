@@ -452,7 +452,7 @@ const formattedCollectors = collectorResultsArray.map((collector, index) => ({
             const query = `
                 SELECT * 
                 FROM collections
-                WHERE chain_id = 167009
+                WHERE chain_id = 167000
                 ORDER BY created_at DESC
                 LIMIT 15
             `;
@@ -507,7 +507,7 @@ app.get('/topcollection', (req, res) => {
        
 app.get('/api/getpermalink/address/:address', (req, res) => {
     const address = req.params.address; // Get the address from the route parameter
-    const chainId = 167009; // Set the chain ID
+    const chainId = 167000; // Set the chain ID
 
     // Check if the address is provided
     if (!address) {
